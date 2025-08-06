@@ -1,0 +1,5 @@
+streamlit>=1.24.0
+biopython>=1.79
+dna-features-viewer>=3.1.0
+matplotlib>=3.5.0
+numpy>=1.21.0
