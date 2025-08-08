@@ -94,14 +94,10 @@ def simulate_delivery(organ: str, method: str) -> bool:
         True if delivery was successful, False otherwise
     """
     # Import here to avoid circular imports
-    from CRISPRcas9_simV3.config import DELIVERY_EFFICIENCY
+    from config import DELIVERY_EFFICIENCY
     
-    if organ not in DELIVERY_EFFICIENCY or method not in DELIVERY_EFFICIENCY[organ]:
-        return False
-    
-    # Simple probability check based on delivery efficiency
-    success_rate = DELIVERY_EFFICIENCY[organ][method]
-    return random.random() < success_rate
+    eff = DELIVERY_EFFICIENCY.get(organ, {}).get(method, 0.1)
+    return random.random() < eff
 
 def delivery_efficiency(base: float, dose: float, route: str) -> float:
     """

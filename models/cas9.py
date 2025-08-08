@@ -41,7 +41,7 @@ class Cas9:
             List of start positions of PAM sites
         """
         # Import here to avoid circular imports
-        from CRISPRcas9_simV3.utils.sequence_utils import is_valid_pam
+        from utils.sequence_utils import is_valid_pam
         
         seq = seq.upper()
         pam_len = len(self.pam_pattern)
@@ -64,53 +64,56 @@ class Cas9:
             List of target site dictionaries with position, sequence, and strand info
         """
         # Import here to avoid circular imports
-        from CRISPRcas9_simV3.utils.sequence_utils import is_valid_pam, reverse_complement
+        from utils.sequence_utils import is_valid_pam
         
-        if not guide_rna:
-            return []
-            
-        guide_rna = guide_rna.upper()
         seq = seq.upper()
-        targets = []
-        
-        # Search on forward strand
-        for i in range(len(seq) - len(guide_rna) + 1):
-            target_seq = seq[i:i+len(guide_rna)]
-            if target_seq == guide_rna:
-                # Check for PAM at the 3' end (NGG for standard SpCas9)
-                pam_pos = i + len(guide_rna)
-                if pam_pos <= len(seq) - len(self.pam_pattern):
-                    pam_seq = seq[pam_pos:pam_pos+len(self.pam_pattern)]
-                    if is_valid_pam(pam_seq, self.pam_pattern):
-                        targets.append({
-                            'position': i,
-                            'sequence': target_seq,
-                            'pam_sequence': pam_seq,
-                            'strand': '+',
-                            'mismatches': 0
-                        })
-        
-        # Search on reverse complement strand
-        rev_guide = reverse_complement(guide_rna)
-        for i in range(len(seq) - len(rev_guide) + 1):
-            target_seq = seq[i:i+len(rev_guide)]
-            if target_seq == rev_guide:
-                # Check for PAM at the 5' end (CCN for standard SpCas9 on reverse strand)
-                pam_pos = i - len(self.pam_pattern)
-                if pam_pos >= 0:
-                    pam_seq = seq[pam_pos:pam_pos+len(self.pam_pattern)]
-                    # For reverse strand, we need to check the reverse complement of the PAM
-                    rev_pam = reverse_complement(pam_seq)
-                    if is_valid_pam(rev_pam, self.pam_pattern):
-                        targets.append({
-                            'position': i,
-                            'sequence': target_seq,
-                            'pam_sequence': pam_seq,
-                            'strand': '-',
-                            'mismatches': 0
-                        })
-        
-        return targets
+        guide_rna = guide_rna.upper()
+        pam = self.pam_pattern.upper()
+        pam_len = len(pam)
+        guide_len = len(guide_rna)
+        targets: List[Dict[str, Any]] = []
+        pam_sites_log: List[Dict[str, Any]] = []
+
+        # Forward strand: gRNA immediately followed by PAM
+        for i in range(len(seq) - guide_len - pam_len + 1):
+            candidate = seq[i:i+guide_len]
+            pam_candidate = seq[i+guide_len:i+guide_len+pam_len]
+            if candidate == guide_rna:
+                pam_sites_log.append({"pos": i+guide_len, "pam_seq": pam_candidate, "strand": "+", "valid": is_valid_pam(pam_candidate, pam)})
+                if is_valid_pam(pam_candidate, pam):
+                    targets.append({
+                        "start": i,
+                        "end": i+guide_len+pam_len,
+                        "pam_pos": i+guide_len,
+                        "mismatches": 0,
+                        "strand": "+",
+                        "target_seq": candidate,
+                        "pam_seq": pam_candidate
+                    })
+
+        # Reverse strand: gRNA (revcomp) immediately followed by PAM
+        rc_seq = str(Seq(seq).reverse_complement())
+        rc_guide = str(Seq(guide_rna).reverse_complement())
+        for i in range(len(rc_seq) - guide_len - pam_len + 1):
+            candidate = rc_seq[i:i+guide_len]
+            pam_candidate = rc_seq[i+guide_len:i+guide_len+pam_len]
+            if candidate == rc_guide:
+                pam_sites_log.append({"pos": i+guide_len, "pam_seq": pam_candidate, "strand": "-", "valid": is_valid_pam(pam_candidate, pam)})
+                if is_valid_pam(pam_candidate, pam):
+                    # Map back to original coordinates
+                    orig_start = len(seq) - (i+guide_len+pam_len)
+                    orig_end = len(seq) - i
+                    targets.append({
+                        "start": orig_start,
+                        "end": orig_end,
+                        "pam_pos": orig_start+guide_len,
+                        "mismatches": 0,
+                        "strand": "-",
+                        "target_seq": candidate,
+                        "pam_seq": pam_candidate
+                    })
+        self.pam_sites_log = pam_sites_log  # For debugging/educational output
+        return sorted(targets, key=lambda x: x['start'])
 
     def simulate_edit(
         self,
@@ -133,14 +136,12 @@ class Cas9:
         """
         seq = str(seq)
         if edit_type == "Knockout (NHEJ)":
-            # Simulate NHEJ by introducing small deletions
             cut_site = target['start'] + len(target['target_seq']) // 2
             del_len = random.randint(1, 3)
             edited = seq[:cut_site] + seq[cut_site+del_len:]
             return edited
         elif edit_type == "Knock-in/Edit (HDR)":
             if donor_template:
-                # Simulate HDR by inserting the donor template at the cut site
                 cut_site = target['start'] + len(target['target_seq']) // 2
                 edited = seq[:cut_site] + donor_template + seq[cut_site:]
                 return edited
